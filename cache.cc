@@ -42,7 +42,6 @@ size_t read_cached_tag(io_buf& cache, example* ae)
 int read_cached_features(parser* p, void* ec)
 {
   example* ae = (example*)ec;
-  size_t mask = global.mask;
   io_buf* input = p->input;
 
   size_t total = p->lp->read_cached_label(ae->ld, *input);
@@ -84,23 +83,13 @@ int read_cached_features(parser* p, void* ec)
 
       char *end = c+storage;
 
-      size_t last = 0;
-      
       for (;c!= end;)
 	{	  
-	  feature f = {1., 0};
-	  size_t temp = f.weight_index;
-	  c = run_len_decode(c,temp);
-	  f.weight_index = temp;
-	  if (f.weight_index & neg_1) 
-	    f.x = -1.;
-	  else if (f.weight_index & general)	    {
-	      f.x = *(float *)c;
-	      c += sizeof(float);
-	    }
-	  f.weight_index = last + (f.weight_index >> 2);
-	  last = f.weight_index;
-	  f.weight_index = f.weight_index & mask;
+          size_t weight_index = *(size_t *)c;
+          c += sizeof(size_t);
+          float x = *(float*)c;
+          c += sizeof(float);
+          feature f = {x, weight_index};
 	  push(*ours, f);
 	}
       p->input->set(c);
@@ -141,10 +130,7 @@ void output_features(io_buf& cache, unsigned char index, feature* begin, feature
 {
   char* c;
   
-  size_t storage = (end-begin) * int_size;
-  for (feature* i = begin; i != end; i++)
-    if (i->x != 1. && i->x != -1.)
-      storage+=sizeof(float);
+  size_t storage = (end-begin) * (sizeof(float) + sizeof(size_t));
   
   buf_write(cache, c, sizeof(index) + storage + sizeof(size_t));
   *(unsigned char*)c = index;
@@ -153,21 +139,12 @@ void output_features(io_buf& cache, unsigned char index, feature* begin, feature
   char *storage_size_loc = c;
   c += sizeof(size_t);
   
-  size_t last = 0;
-  
   for (feature* i = begin; i != end; i++)
     {
-      size_t diff = (i->weight_index - last) << 2;
-      last = i->weight_index;
-      if (i->x == 1.) 
-	c = run_len_encode(c, diff);
-      else if (i->x == -1.) 
-	c = run_len_encode(c, diff | neg_1);
-      else {
-	c = run_len_encode(c, diff | general);
-	*(float *)c = i->x;
-	c += sizeof(float);
-      }
+      *(size_t *)c = i->weight_index;
+      c += sizeof(size_t);
+      *(float *)c = i->x;
+      c += sizeof(float);
     }
   cache.set(c);
   *(size_t*)storage_size_loc = c - storage_size_loc - sizeof(size_t);  
